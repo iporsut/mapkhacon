@@ -8,6 +8,7 @@ import (
 	"io/ioutil"
 	"log"
 	"os"
+	"runtime"
 	"strings"
 	"unicode/utf8"
 
@@ -245,6 +246,20 @@ func Segment(line string, dict PrefixTree) []string {
 	return tokens
 }
 
+type Data struct {
+	lineNo int
+	line   string
+}
+
+func MapSegemnt(lineNo int, line string, dict PrefixTree, out chan Data) {
+	out <- Data{lineNo: lineNo, line: strings.Join(Segment(line, dict), "|")}
+}
+
+func CollectResult(result map[int]string, in chan Data) {
+	data := <-in
+	result[data.lineNo] = data.line
+}
+
 func main() {
 	s := profile.Start(profile.CPUProfile, profile.ProfilePath("."))
 	defer s.Stop()
@@ -263,9 +278,18 @@ func main() {
 	scanner := bufio.NewScanner(bytes.NewReader(b))
 	outbuf := bufio.NewWriter(os.Stdout)
 	i := 0
+	result := make(map[int]string)
+	chData := make(chan Data, runtime.NumCPU())
 	for scanner.Scan() {
-		fmt.Fprintln(outbuf, strings.Join(Segment(scanner.Text(), dict), "|"))
+		j := i
+		go MapSegemnt(j, scanner.Text(), dict, chData)
 		i++
+	}
+	for j := 0; j < i; j++ {
+		CollectResult(result, chData)
+	}
+	for j := 0; j < i; j++ {
+		fmt.Fprintln(outbuf, result[j])
 	}
 	outbuf.Flush()
 }
