@@ -1,6 +1,18 @@
 package main
 
-import "unicode/utf8"
+import (
+	"bufio"
+	"bytes"
+	"flag"
+	"fmt"
+	"io/ioutil"
+	"log"
+	"os"
+	"strings"
+	"unicode/utf8"
+
+	"github.com/pkg/profile"
+)
 
 type Etype int
 
@@ -26,24 +38,6 @@ type DictBuilderPointer struct {
 	IsFinal bool
 }
 
-// IsBetterThan - comparing this edge to another edge
-
-/*func (edge *Edge) IsBetterThan(another *Edge) bool {
-	if edge == nil {
-		return false
-	}
-
-	if another == nil {
-		return true
-	}
-
-	if (edge.UnkCount < another.UnkCount) || ((edge.UnkCount == another.UnkCount) && (edge.WordCount < another.WordCount)) {
-		return true
-	}
-
-	return false
-}*/
-
 func IsSpace(ch rune) bool {
 	return ch == ' ' ||
 		ch == '\n' ||
@@ -60,45 +54,120 @@ func IsLatin(ch rune) bool {
 		(ch >= 'a' && ch <= 'z')
 }
 
-func BuildPath(lineNo int, line string, dict PrefixTree) []Edge {
-	path := make([]Edge, utf8.RuneCountInString(line)+1)
+func BuildPath(line string, dict PrefixTree) []Edge {
+	length := utf8.RuneCountInString(line)
+	path := make([]Edge, length+1)
 	path[0] = Edge{S: 0, EdgeType: INIT, WordCount: 0, UnkCount: 0}
 
 	var (
 		leftBoundary int
 
 		startLatin int
-		endLatin   int
 		foundLatin bool
 
 		startSpace int
-		endSpace   int
 		foundSpace bool
 		bestEdge   *Edge
 		pointers   []DictBuilderPointer
 	)
-
-	for i, ch := range line {
-		var bestEdge *Edge
+	i := 0
+	for _, ch := range line {
+		bestEdge = nil
 		// Check Edge type should be one of this
 		// Latin, Space, Dict, Unknow
 		if IsLatin(ch) {
 			// check end of space because current is not space
-			// check end of latin because last ch
-			if !foundLatin {
-				if IsLatin(ch) {
-					startLatin = i
-					foundLatin = true
+			// Replace last edge with space edge type
+			if foundSpace {
+				source := path[startSpace]
+				path[i] = Edge{
+					S:         startSpace,
+					EdgeType:  SPACE,
+					WordCount: source.WordCount + 1,
+					UnkCount:  source.UnkCount,
 				}
+				foundSpace = false
+				leftBoundary = i
 			}
+
+			if !foundLatin {
+				startLatin = i
+				foundLatin = true
+			}
+
+			// check end of latin because last ch
+			if i == length-1 {
+				source := path[startLatin]
+				bestEdge = &Edge{
+					S:         startLatin,
+					EdgeType:  LATIN,
+					WordCount: source.WordCount + 1,
+					UnkCount:  source.UnkCount,
+				}
+				foundLatin = false
+			}
+
 		} else if IsSpace(ch) {
 			// check end of latin because current is not latin
+			// Replace last edge with latin edge type
+			if foundLatin {
+				source := path[startLatin]
+				path[i] = Edge{
+					S:         startLatin,
+					EdgeType:  LATIN,
+					WordCount: source.WordCount + 1,
+					UnkCount:  source.UnkCount,
+				}
+				foundLatin = false
+				leftBoundary = i
+			}
+
+			if !foundSpace {
+				startSpace = i
+				foundSpace = true
+			}
+
 			// check end of space because last ch
+			if i == length-1 {
+				source := path[startSpace]
+				bestEdge = &Edge{
+					S:         startSpace,
+					EdgeType:  SPACE,
+					WordCount: source.WordCount + 1,
+					UnkCount:  source.UnkCount,
+				}
+				foundSpace = false
+			}
 		} else {
 			// check end of latin or end of space because current is not latin or space
+			if foundSpace {
+				source := path[startSpace]
+				path[i] = Edge{
+					S:         startSpace,
+					EdgeType:  SPACE,
+					WordCount: source.WordCount + 1,
+					UnkCount:  source.UnkCount,
+				}
+				foundSpace = false
+				leftBoundary = i
+			}
+
+			if foundLatin {
+				source := path[startLatin]
+				path[i] = Edge{
+					S:         startLatin,
+					EdgeType:  LATIN,
+					WordCount: source.WordCount + 1,
+					UnkCount:  source.UnkCount,
+				}
+				foundLatin = false
+				leftBoundary = i
+			}
+
 			pointers = append(pointers, DictBuilderPointer{})
 			newIndex := 0
-			for i, p := range pointers {
+			for j, _ := range pointers {
+				p := pointers[j]
 				childNode, found := dict[PrefixTreeNode{p.NodeID, p.Offset, ch}]
 				if !found {
 					continue
@@ -108,9 +177,9 @@ func BuildPath(lineNo int, line string, dict PrefixTree) []Edge {
 				p.Offset++
 				pointers[newIndex] = p
 				newIndex++
-
 			}
 			pointers = pointers[:newIndex]
+
 			for _, pointer := range pointers {
 				if pointer.IsFinal {
 					s := 1 + i - pointer.Offset
@@ -123,7 +192,8 @@ func BuildPath(lineNo int, line string, dict PrefixTree) []Edge {
 					}
 					if bestEdge == nil {
 						bestEdge = &edge
-					} else if !((bestEdge.UnkCount < edge.UnkCount) || ((bestEdge.UnkCount == edge.UnkCount) && (bestEdge.WordCount < edge.WordCount))) {
+					} else if (edge.UnkCount < bestEdge.UnkCount) ||
+						((edge.UnkCount == bestEdge.UnkCount) && (edge.WordCount <= bestEdge.WordCount)) {
 						bestEdge = &edge
 					}
 				}
@@ -138,9 +208,64 @@ func BuildPath(lineNo int, line string, dict PrefixTree) []Edge {
 				WordCount: source.WordCount + 1,
 				UnkCount:  source.UnkCount + 1,
 			}
+		} else {
 			leftBoundary = i + 1
 		}
 		path[i+1] = *bestEdge
+		i++
 	}
 	return path
+}
+
+type TextRange struct {
+	s int
+	e int
+}
+
+func PathToRanges(path []Edge) []TextRange {
+	ranges := make([]TextRange, len(path))
+	j := len(ranges) - 1
+	for e := len(path) - 1; e > 0; {
+		s := path[e].S
+		ranges[j] = TextRange{s, e}
+		j--
+		e = s
+	}
+	return ranges[j+1:]
+}
+
+func Segment(line string, dict PrefixTree) []string {
+	textRunes := []rune(line)
+	paths := BuildPath(line, dict)
+	ranges := PathToRanges(paths)
+	tokens := make([]string, len(ranges))
+	for i, r := range ranges {
+		tokens[i] = string(textRunes[r.s:r.e])
+	}
+	return tokens
+}
+
+func main() {
+	s := profile.Start(profile.CPUProfile, profile.ProfilePath("."))
+	defer s.Stop()
+	var dixPath string
+	flag.StringVar(&dixPath, "dix", "", "Dictionary path")
+	flag.Parse()
+	dict, err := LoadDict(dixPath)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	b, err := ioutil.ReadAll(os.Stdin)
+	if err != nil {
+		log.Fatal("could not read input:", err)
+	}
+	scanner := bufio.NewScanner(bytes.NewReader(b))
+	outbuf := bufio.NewWriter(os.Stdout)
+	i := 0
+	for scanner.Scan() {
+		fmt.Fprintln(outbuf, strings.Join(Segment(scanner.Text(), dict), "|"))
+		i++
+	}
+	outbuf.Flush()
 }
