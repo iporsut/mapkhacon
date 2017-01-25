@@ -281,8 +281,7 @@ func main() {
 	result := make(map[int]string)
 	chData := make(chan Data, runtime.NumCPU())
 	for scanner.Scan() {
-		j := i
-		go MapSegemnt(j, scanner.Text(), dict, chData)
+		go MapSegemnt(i, scanner.Text(), dict, chData)
 		i++
 	}
 	for j := 0; j < i; j++ {
