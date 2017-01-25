@@ -1,4 +1,4 @@
-package mapkha
+package main
 
 import (
 	"reflect"
