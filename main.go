@@ -11,8 +11,6 @@ import (
 	"runtime"
 	"strings"
 	"unicode/utf8"
-
-	"github.com/pkg/profile"
 )
 
 type Etype int
@@ -260,9 +258,7 @@ func CollectResult(result map[int]string, in chan Data) {
 	result[data.lineNo] = data.line
 }
 
-func main() {
-	s := profile.Start(profile.CPUProfile, profile.ProfilePath("."))
-	defer s.Stop()
+func ConcurrentVersion() {
 	var dixPath string
 	flag.StringVar(&dixPath, "dix", "", "Dictionary path")
 	flag.Parse()
@@ -291,4 +287,32 @@ func main() {
 		fmt.Fprintln(outbuf, result[j])
 	}
 	outbuf.Flush()
+
+}
+
+func SequentialVersion() {
+	var dixPath string
+	flag.StringVar(&dixPath, "dix", "", "Dictionary path")
+	flag.Parse()
+	dict, err := LoadDict(dixPath)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	b, err := ioutil.ReadAll(os.Stdin)
+	if err != nil {
+		log.Fatal("could not read input:", err)
+	}
+	scanner := bufio.NewScanner(bytes.NewReader(b))
+	outbuf := bufio.NewWriter(os.Stdout)
+	i := 0
+	for scanner.Scan() {
+		fmt.Fprintln(outbuf, strings.Join(Segment(scanner.Text(), dict), "|"))
+		i++
+	}
+	outbuf.Flush()
+}
+
+func main() {
+	ConcurrentVersion()
 }
