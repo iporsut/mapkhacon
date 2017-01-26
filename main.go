@@ -14,20 +14,9 @@ import (
 	"strings"
 )
 
-type Etype int
-
-const (
-	DICT  Etype = 1
-	UNK         = 2
-	INIT        = 3
-	LATIN       = 4
-	SPACE       = 5
-)
-
 // Edge - edge of word graph
 type Edge struct {
 	S         int
-	EdgeType  Etype
 	WordCount int
 	UnkCount  int
 }
@@ -126,7 +115,7 @@ func MakePrefixTree(wordsWithPayload []string) PrefixTree {
 func BuildPath(line []rune, dict PrefixTree) []Edge {
 	length := len(line)
 	path := make([]Edge, length+1)
-	path[0] = Edge{S: 0, EdgeType: INIT, WordCount: 0, UnkCount: 0}
+	path[0] = Edge{S: 0, WordCount: 0, UnkCount: 0}
 
 	var (
 		leftBoundary int
@@ -150,7 +139,6 @@ func BuildPath(line []rune, dict PrefixTree) []Edge {
 				source := path[startSpace]
 				path[i] = Edge{
 					S:         startSpace,
-					EdgeType:  SPACE,
 					WordCount: source.WordCount + 1,
 					UnkCount:  source.UnkCount,
 				}
@@ -168,7 +156,6 @@ func BuildPath(line []rune, dict PrefixTree) []Edge {
 				source := path[startLatin]
 				bestEdge = &Edge{
 					S:         startLatin,
-					EdgeType:  LATIN,
 					WordCount: source.WordCount + 1,
 					UnkCount:  source.UnkCount,
 				}
@@ -182,7 +169,6 @@ func BuildPath(line []rune, dict PrefixTree) []Edge {
 				source := path[startLatin]
 				path[i] = Edge{
 					S:         startLatin,
-					EdgeType:  LATIN,
 					WordCount: source.WordCount + 1,
 					UnkCount:  source.UnkCount,
 				}
@@ -200,7 +186,6 @@ func BuildPath(line []rune, dict PrefixTree) []Edge {
 				source := path[startSpace]
 				bestEdge = &Edge{
 					S:         startSpace,
-					EdgeType:  SPACE,
 					WordCount: source.WordCount + 1,
 					UnkCount:  source.UnkCount,
 				}
@@ -212,7 +197,6 @@ func BuildPath(line []rune, dict PrefixTree) []Edge {
 				source := path[startSpace]
 				path[i] = Edge{
 					S:         startSpace,
-					EdgeType:  SPACE,
 					WordCount: source.WordCount + 1,
 					UnkCount:  source.UnkCount,
 				}
@@ -224,7 +208,6 @@ func BuildPath(line []rune, dict PrefixTree) []Edge {
 				source := path[startLatin]
 				path[i] = Edge{
 					S:         startLatin,
-					EdgeType:  LATIN,
 					WordCount: source.WordCount + 1,
 					UnkCount:  source.UnkCount,
 				}
@@ -254,7 +237,6 @@ func BuildPath(line []rune, dict PrefixTree) []Edge {
 					source := path[s]
 					edge := Edge{
 						S:         s,
-						EdgeType:  DICT,
 						WordCount: source.WordCount + 1,
 						UnkCount:  source.UnkCount,
 					}
@@ -272,7 +254,6 @@ func BuildPath(line []rune, dict PrefixTree) []Edge {
 			source := path[leftBoundary]
 			bestEdge = &Edge{
 				S:         leftBoundary,
-				EdgeType:  UNK,
 				WordCount: source.WordCount + 1,
 				UnkCount:  source.UnkCount + 1,
 			}
