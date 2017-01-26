@@ -8,9 +8,10 @@ import (
 	"io/ioutil"
 	"log"
 	"os"
+	"path"
 	"runtime"
+	"sort"
 	"strings"
-	"unicode/utf8"
 )
 
 type Etype int
@@ -53,8 +54,77 @@ func IsLatin(ch rune) bool {
 		(ch >= 'a' && ch <= 'z')
 }
 
-func BuildPath(line string, dict PrefixTree) []Edge {
-	length := utf8.RuneCountInString(line)
+// LoadDict is for loading a word list from file
+func LoadDict(path string) (PrefixTree, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	b, err := ioutil.ReadAll(f)
+	if err != nil {
+		log.Fatal("could not read input:", err)
+	}
+	scanner := bufio.NewScanner(bytes.NewReader(b))
+	wordWithPayloads := make([]string, 0)
+	for scanner.Scan() {
+		if line := scanner.Text(); len(line) != 0 {
+			wordWithPayloads = append(wordWithPayloads, line)
+		}
+	}
+	return MakePrefixTree(wordWithPayloads), nil
+}
+
+// LoadDefaultDict - loading default Thai dictionary
+func LoadDefaultDict() (PrefixTree, error) {
+	_, filename, _, _ := runtime.Caller(0)
+	return LoadDict(path.Join(path.Dir(filename), "tdict-std.txt"))
+}
+
+// PrefixTreeNode represents node in a prefix tree
+type PrefixTreeNode struct {
+	NodeID int
+	Offset int
+	Ch     rune
+}
+
+// PrefixTreePointer is partial information of edge
+type PrefixTreePointer struct {
+	ChildID int
+	IsFinal bool
+}
+
+// PrefixTree is a Hash-based Prefix Tree for searching words
+type PrefixTree map[PrefixTreeNode]PrefixTreePointer
+
+// MakePrefixTree is for constructing prefix tree for word with payload list
+func MakePrefixTree(wordsWithPayload []string) PrefixTree {
+	sort.Strings(wordsWithPayload)
+	tab := make(map[PrefixTreeNode]PrefixTreePointer)
+
+	for i, wordWithPayload := range wordsWithPayload {
+		word := wordWithPayload
+		rowNo := 0
+
+		runes := []rune(word)
+		for j, ch := range runes {
+			isFinal := ((j + 1) == len(runes))
+			node := PrefixTreeNode{rowNo, j, ch}
+			child, found := tab[node]
+
+			if !found {
+				tab[node] = PrefixTreePointer{i, isFinal}
+				rowNo = i
+			} else {
+				rowNo = child.ChildID
+			}
+		}
+	}
+	return PrefixTree(tab)
+}
+
+func BuildPath(line []rune, dict PrefixTree) []Edge {
+	length := len(line)
 	path := make([]Edge, length+1)
 	path[0] = Edge{S: 0, EdgeType: INIT, WordCount: 0, UnkCount: 0}
 
@@ -69,8 +139,7 @@ func BuildPath(line string, dict PrefixTree) []Edge {
 		bestEdge   *Edge
 		pointers   []DictBuilderPointer
 	)
-	i := 0
-	for _, ch := range line {
+	for i, ch := range line {
 		bestEdge = nil
 		// Check Edge type should be one of this
 		// Latin, Space, Dict, Unknow
@@ -211,37 +280,28 @@ func BuildPath(line string, dict PrefixTree) []Edge {
 			leftBoundary = i + 1
 		}
 		path[i+1] = *bestEdge
-		i++
 	}
 	return path
 }
 
-type TextRange struct {
-	s int
-	e int
-}
-
-func PathToRanges(path []Edge) []TextRange {
-	ranges := make([]TextRange, len(path))
-	j := len(ranges) - 1
-	for e := len(path) - 1; e > 0; {
-		s := path[e].S
-		ranges[j] = TextRange{s, e}
-		j--
-		e = s
-	}
-	return ranges[j+1:]
-}
-
 func Segment(line string, dict PrefixTree) []string {
 	textRunes := []rune(line)
-	paths := BuildPath(line, dict)
-	ranges := PathToRanges(paths)
-	tokens := make([]string, len(ranges))
-	for i, r := range ranges {
-		tokens[i] = string(textRunes[r.s:r.e])
+	path := BuildPath(textRunes, dict)
+
+	l := len(path)
+	tokens := make([]string, l)
+	e := l - 1
+	i := e
+	s := path[e].S
+
+	for e > 0 {
+		s = path[e].S
+		tokens[i] = string(textRunes[s:e])
+		e = s
+		i--
 	}
-	return tokens
+
+	return tokens[i+1:]
 }
 
 type Data struct {
@@ -250,7 +310,8 @@ type Data struct {
 }
 
 func MapSegemnt(lineNo int, line string, dict PrefixTree, out chan Data) {
-	out <- Data{lineNo: lineNo, line: strings.Join(Segment(line, dict), "|")}
+	line = strings.Join(Segment(line, dict), "|")
+	out <- Data{lineNo: lineNo, line: line}
 }
 
 func CollectResult(result map[int]string, in chan Data) {
@@ -315,4 +376,5 @@ func SequentialVersion() {
 
 func main() {
 	ConcurrentVersion()
+	//SequentialVersion()
 }
