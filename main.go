@@ -115,7 +115,7 @@ func MakePrefixTree(wordsWithPayload []string) PrefixTree {
 func BuildPath(line []rune, dict PrefixTree) []Edge {
 	length := len(line)
 	path := make([]Edge, length+1)
-	path[0] = Edge{S: 0, WordCount: 0, UnkCount: 0}
+	path[0] = Edge{}
 
 	var (
 		leftBoundary int
