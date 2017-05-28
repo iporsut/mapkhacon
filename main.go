@@ -50,11 +50,7 @@ func LoadDict(path string) (PrefixTree, error) {
 		return nil, err
 	}
 	defer f.Close()
-	b, err := ioutil.ReadAll(f)
-	if err != nil {
-		log.Fatal("could not read input:", err)
-	}
-	scanner := bufio.NewScanner(bytes.NewReader(b))
+	scanner := bufio.NewScanner(f)
 	wordWithPayloads := make([]string, 0)
 	for scanner.Scan() {
 		if line := scanner.Text(); len(line) != 0 {
@@ -130,7 +126,7 @@ func main() {
 		log.Fatal("could not read input:", err)
 	}
 	scanner := bufio.NewScanner(bytes.NewReader(b))
-	outbuf := bufio.NewWriterSize(os.Stdout, len(b)*2+4096)
+	outbuf := bufio.NewWriter(os.Stdout)
 	i := 0
 	var wg sync.WaitGroup
 	numWorker := runtime.NumCPU()
@@ -154,7 +150,7 @@ func main() {
 		sm := <-smw
 		go func(sm *Segmenter, lineNo int, textRunes []rune, out chan Data) {
 			defer wg.Done()
-			line := strings.Join(sm.Segment(textRunes), "|")
+			line := strings.Join(sm.Segment(textRunes), "|") + "\n"
 			out <- Data{lineNo: lineNo, line: line}
 			smw <- sm
 		}(sm, i, []rune(text), chData)
@@ -164,7 +160,6 @@ func main() {
 	done <- struct{}{}
 	for j := 0; j < i; j++ {
 		outbuf.WriteString(result[j])
-		outbuf.WriteString("\n")
 	}
 	outbuf.Flush()
 }
@@ -174,8 +169,6 @@ func InitSegmentWorker(dict PrefixTree, numWorker int) chan *Segmenter {
 	for i := 0; i < numWorker; i++ {
 		smw <- &Segmenter{
 			dict: dict,
-			// path:     make([]Edge, 4096),
-			// pointers: make([]DictBuilderPointer, 0, 4096),
 		}
 	}
 	return smw
