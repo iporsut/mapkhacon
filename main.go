@@ -117,8 +117,6 @@ type Data struct {
 }
 
 func main() {
-	// p := profile.Start(profile.CPUProfile, profile.ProfilePath("."))
-	// defer p.Stop()
 	var dixPath string
 	flag.StringVar(&dixPath, "dix", "", "Dictionary path")
 	flag.Parse()
@@ -191,11 +189,12 @@ type Segmenter struct {
 	startLatin int
 	foundLatin bool
 
-	startSpace int
-	foundSpace bool
-	bestEdge   *Edge
-	pointers   []DictBuilderPointer
-	length     int
+	startSpace    int
+	foundSpace    bool
+	bestEdge      Edge
+	foundBestEdge bool
+	pointers      []DictBuilderPointer
+	length        int
 }
 
 func (sm *Segmenter) Segment(textRunes []rune) []string {
@@ -231,13 +230,16 @@ func (sm *Segmenter) BuildPath(line []rune) {
 	sm.startLatin = 0
 	sm.foundLatin = false
 	sm.startSpace = 0
-	sm.bestEdge = nil
 	if sm.pointers != nil {
 		sm.pointers = sm.pointers[:0]
 	}
 
 	for i, ch := range line {
-		sm.bestEdge = nil
+		sm.bestEdge.S = 0
+		sm.bestEdge.WordCount = 0
+		sm.bestEdge.UnkCount = 0
+		sm.foundBestEdge = false
+
 		// Check Edge type should be one of this
 		// Latin, Space, Dict, Unknow
 		if IsLatin(ch) {
@@ -262,11 +264,10 @@ func (sm *Segmenter) BuildPath(line []rune) {
 			// check end of latin because last ch
 			if i == sm.length-1 {
 				source := sm.path[sm.startLatin]
-				sm.bestEdge = &Edge{
-					S:         sm.startLatin,
-					WordCount: source.WordCount + 1,
-					UnkCount:  source.UnkCount,
-				}
+				sm.bestEdge.S = sm.startLatin
+				sm.bestEdge.WordCount = source.WordCount + 1
+				sm.bestEdge.UnkCount = source.UnkCount
+				sm.foundBestEdge = true
 				sm.foundLatin = false
 			}
 
@@ -292,11 +293,10 @@ func (sm *Segmenter) BuildPath(line []rune) {
 			// check end of space because last ch
 			if i == sm.length-1 {
 				source := sm.path[sm.startSpace]
-				sm.bestEdge = &Edge{
-					S:         sm.startSpace,
-					WordCount: source.WordCount + 1,
-					UnkCount:  source.UnkCount,
-				}
+				sm.bestEdge.S = sm.startSpace
+				sm.bestEdge.WordCount = source.WordCount + 1
+				sm.bestEdge.UnkCount = source.UnkCount
+				sm.foundBestEdge = true
 				sm.foundSpace = false
 			}
 		} else {
@@ -348,26 +348,27 @@ func (sm *Segmenter) BuildPath(line []rune) {
 						WordCount: source.WordCount + 1,
 						UnkCount:  source.UnkCount,
 					}
-					if sm.bestEdge == nil {
-						sm.bestEdge = &edge
+					if !sm.foundBestEdge {
+						sm.bestEdge = edge
+						sm.foundBestEdge = true
 					} else if (edge.UnkCount < sm.bestEdge.UnkCount) ||
 						((edge.UnkCount == sm.bestEdge.UnkCount) && (edge.WordCount <= sm.bestEdge.WordCount)) {
-						sm.bestEdge = &edge
+						sm.bestEdge = edge
+						sm.foundBestEdge = true
 					}
 				}
 			}
 		}
 
-		if sm.bestEdge == nil {
+		if !sm.foundBestEdge {
 			source := sm.path[sm.leftBoundary]
-			sm.bestEdge = &Edge{
-				S:         sm.leftBoundary,
-				WordCount: source.WordCount + 1,
-				UnkCount:  source.UnkCount + 1,
-			}
+			sm.bestEdge.S = sm.leftBoundary
+			sm.bestEdge.WordCount = source.WordCount + 1
+			sm.bestEdge.UnkCount = source.UnkCount + 1
+			sm.foundBestEdge = true
 		} else {
 			sm.leftBoundary = i + 1
 		}
-		sm.path[i+1] = *sm.bestEdge
+		sm.path[i+1] = sm.bestEdge
 	}
 }
