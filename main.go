@@ -89,7 +89,7 @@ type PrefixTree map[PrefixTreeNode]PrefixTreePointer
 
 // MakePrefixTree is for constructing prefix tree for word with payload list
 func MakePrefixTree(wordsWithPayload []string) PrefixTree {
-	tab := make(map[PrefixTreeNode]PrefixTreePointer)
+	tab := make(PrefixTree)
 	for i, wordWithPayload := range wordsWithPayload {
 		word := wordWithPayload
 		rowNo := 0
@@ -98,9 +98,8 @@ func MakePrefixTree(wordsWithPayload []string) PrefixTree {
 		for j, ch := range runes {
 			isFinal := ((j + 1) == len(runes))
 			node := PrefixTreeNode{rowNo, j, ch}
-			child, found := tab[node]
 
-			if !found {
+			if child, found := tab[node]; !found {
 				tab[node] = PrefixTreePointer{i, isFinal}
 				rowNo = i
 			} else {
@@ -108,7 +107,8 @@ func MakePrefixTree(wordsWithPayload []string) PrefixTree {
 			}
 		}
 	}
-	return PrefixTree(tab)
+
+	return tab
 }
 
 type LineInput struct {
