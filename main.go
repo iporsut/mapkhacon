@@ -116,15 +116,67 @@ func main() {
 	// p := profile.Start(profile.CPUProfile, profile.ProfilePath("."))
 	// defer p.Stop()
 
-	var dixPath string
-	flag.StringVar(&dixPath, "dix", "", "Dictionary path")
+	var dictPath string
+	flag.StringVar(&dictPath, "dix", "", "Dictionary path")
 	flag.Parse()
 
-	dict, err := LoadDict(dixPath)
+	w := NewSegmenterWorker(dictPath)
+	w.StartWorker()
+	w.Run()
+}
+
+func NewSegmenterWorker(dictPath string) *SegmenterWorker {
+	dict, err := LoadDict(dictPath)
 	if err != nil {
 		log.Fatal(err)
 	}
 
+	return &SegmenterWorker{
+		dict: dict,
+	}
+}
+
+type SegmenterWorker struct {
+	dict        PrefixTree
+	lineInputCh chan LineInput
+	result      Result
+	done        chan struct{}
+
+	wg   sync.WaitGroup
+	once sync.Once
+}
+
+func (w *SegmenterWorker) StartWorker() {
+	w.once.Do(func() {
+		w.lineInputCh = make(chan LineInput, runtime.NumCPU())
+		w.result = Result{
+			out:    bufio.NewWriter(os.Stdout),
+			result: make(map[int]string),
+		}
+		w.done = make(chan struct{})
+	})
+
+	for wc := 0; wc < runtime.NumCPU(); wc++ {
+		go func() {
+			sm := Segmenter{
+				dict: w.dict,
+			}
+
+			for {
+				select {
+				case lineInput := <-w.lineInputCh:
+					w.result.Set(lineInput.lineNo, strings.Join(sm.Segment(lineInput.textRunes), "|")+"\n")
+					w.wg.Done()
+				case <-w.done:
+					return
+				}
+			}
+
+		}()
+	}
+}
+
+func (w *SegmenterWorker) Run() {
 	b, err := ioutil.ReadAll(os.Stdin)
 	if err != nil {
 		log.Fatal("could not read input:", err)
@@ -132,56 +184,42 @@ func main() {
 
 	scanner := bufio.NewScanner(bytes.NewReader(b))
 
-	var resultMu sync.Mutex
-	outbuf := bufio.NewWriter(os.Stdout)
-
-	var wg sync.WaitGroup
-	numWorker := runtime.NumCPU()
-	result := make(map[int]string)
-	lineInputCh := make(chan LineInput, numWorker)
-	done := make(chan struct{})
-
-	for w := 0; w < numWorker; w++ {
-		go func() {
-			sm := &Segmenter{
-				dict: dict,
-			}
-			for {
-				select {
-				case lineInput := <-lineInputCh:
-					line := strings.Join(sm.Segment(lineInput.textRunes), "|") + "\n"
-					resultMu.Lock()
-					result[lineInput.lineNo] = line
-					resultMu.Unlock()
-					wg.Done()
-				case <-done:
-					return
-				}
-			}
-		}()
-	}
-
 	i := 0
 	for scanner.Scan() {
-		wg.Add(1)
+		w.wg.Add(1)
 		text := scanner.Text()
-		lineInputCh <- LineInput{
+		w.lineInputCh <- LineInput{
 			lineNo:    i,
 			textRunes: []rune(text),
 		}
 		i++
 	}
 
-	wg.Wait()
-	close(done)
+	w.wg.Wait()
+	close(w.done)
+	w.result.WriteOut()
+}
 
-	for j := 0; j < i; j++ {
-		resultMu.Lock()
-		outbuf.WriteString(result[j])
-		resultMu.Unlock()
+type Result struct {
+	out *bufio.Writer
+
+	mu     sync.Mutex
+	result map[int]string
+}
+
+func (r *Result) Set(lineNo int, line string) {
+	r.mu.Lock()
+	r.result[lineNo] = line
+	r.mu.Unlock()
+}
+
+func (r *Result) WriteOut() {
+	for i := 0; i < len(r.result); i++ {
+		r.mu.Lock()
+		r.out.WriteString(r.result[i])
+		r.mu.Unlock()
 	}
-
-	outbuf.Flush()
+	r.out.Flush()
 }
 
 type Segmenter struct {
