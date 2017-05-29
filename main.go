@@ -50,7 +50,11 @@ func LoadDict(path string) (PrefixTree, error) {
 		return nil, err
 	}
 	defer f.Close()
-	scanner := bufio.NewScanner(f)
+	b, err := ioutil.ReadAll(f)
+	if err != nil {
+		return nil, err
+	}
+	scanner := bufio.NewScanner(bytes.NewReader(b))
 	wordWithPayloads := make([]string, 0)
 	for scanner.Scan() {
 		if line := scanner.Text(); len(line) != 0 {
@@ -119,6 +123,7 @@ func main() {
 	var dixPath string
 	flag.StringVar(&dixPath, "dix", "", "Dictionary path")
 	flag.Parse()
+
 	dict, err := LoadDict(dixPath)
 	if err != nil {
 		log.Fatal(err)
@@ -128,15 +133,18 @@ func main() {
 	if err != nil {
 		log.Fatal("could not read input:", err)
 	}
+
 	scanner := bufio.NewScanner(bytes.NewReader(b))
+
+	var resultMu sync.Mutex
 	outbuf := bufio.NewWriter(os.Stdout)
-	i := 0
+
 	var wg sync.WaitGroup
 	numWorker := runtime.NumCPU()
 	result := make(map[int]string)
 	lineInputCh := make(chan LineInput, numWorker)
 	done := make(chan struct{})
-	var resultMu sync.Mutex
+
 	for w := 0; w < numWorker; w++ {
 		go func() {
 			sm := &Segmenter{
@@ -156,6 +164,8 @@ func main() {
 			}
 		}()
 	}
+
+	i := 0
 	for scanner.Scan() {
 		wg.Add(1)
 		text := scanner.Text()
@@ -165,30 +175,23 @@ func main() {
 		}
 		i++
 	}
+
 	wg.Wait()
 	close(done)
+
 	for j := 0; j < i; j++ {
 		resultMu.Lock()
 		outbuf.WriteString(result[j])
 		resultMu.Unlock()
 	}
+
 	outbuf.Flush()
 }
 
 type Segmenter struct {
-	dict         PrefixTree
-	path         []Edge // for edges of graph
-	leftBoundary int
-
-	startLatin int
-	foundLatin bool
-
-	startSpace    int
-	foundSpace    bool
-	bestEdge      Edge
-	foundBestEdge bool
-	pointers      []DictBuilderPointer
-	length        int
+	dict     PrefixTree
+	path     []Edge
+	pointers []DictBuilderPointer
 }
 
 func (sm *Segmenter) Segment(textRunes []rune) []string {
@@ -211,110 +214,116 @@ func (sm *Segmenter) Segment(textRunes []rune) []string {
 }
 
 func (sm *Segmenter) BuildPath(line []rune) {
-	sm.length = len(line)
+	var (
+		leftBoundary  int
+		startLatin    int
+		foundLatin    bool
+		startSpace    int
+		foundSpace    bool
+		bestEdge      Edge
+		foundBestEdge bool
+		length        int
+	)
+
+	length = len(line)
 	if sm.path == nil {
-		sm.path = make([]Edge, sm.length+1)
+		sm.path = make([]Edge, length+1)
 	} else {
 		sm.path = sm.path[:0]
-		for i := 0; i < sm.length+1; i++ {
+		for i := 0; i < length+1; i++ {
 			sm.path = append(sm.path, Edge{})
 		}
 	}
-	sm.leftBoundary = 0
-	sm.startLatin = 0
-	sm.foundLatin = false
-	sm.startSpace = 0
+
 	if sm.pointers != nil {
 		sm.pointers = sm.pointers[:0]
 	}
 
 	for i, ch := range line {
-		sm.bestEdge.S = 0
-		sm.bestEdge.WordCount = 0
-		sm.bestEdge.UnkCount = 0
-		sm.foundBestEdge = false
+		bestEdge = Edge{}
+		foundBestEdge = false
 
 		// Check Edge type should be one of this
 		// Latin, Space, Dict, Unknow
 		if IsLatin(ch) {
 			// check end of space because current is not space
 			// Replace last edge with space edge type
-			if sm.foundSpace {
-				source := sm.path[sm.startSpace]
+			if foundSpace {
+				source := sm.path[startSpace]
 				sm.path[i] = Edge{
-					S:         sm.startSpace,
+					S:         startSpace,
 					WordCount: source.WordCount + 1,
 					UnkCount:  source.UnkCount,
 				}
-				sm.foundSpace = false
-				sm.leftBoundary = i
+				foundSpace = false
+				leftBoundary = i
 			}
 
-			if !sm.foundLatin {
-				sm.startLatin = i
-				sm.foundLatin = true
+			if !foundLatin {
+				startLatin = i
+				foundLatin = true
 			}
 
 			// check end of latin because last ch
-			if i == sm.length-1 {
-				source := sm.path[sm.startLatin]
-				sm.bestEdge.S = sm.startLatin
-				sm.bestEdge.WordCount = source.WordCount + 1
-				sm.bestEdge.UnkCount = source.UnkCount
-				sm.foundBestEdge = true
-				sm.foundLatin = false
+			if i == length-1 {
+				source := sm.path[startLatin]
+				bestEdge.S = startLatin
+				bestEdge.WordCount = source.WordCount + 1
+				bestEdge.UnkCount = source.UnkCount
+				foundBestEdge = true
+				foundLatin = false
 			}
 
 		} else if IsSpace(ch) {
 			// check end of latin because current is not latin
 			// Replace last edge with latin edge type
-			if sm.foundLatin {
-				source := sm.path[sm.startLatin]
+			if foundLatin {
+				source := sm.path[startLatin]
 				sm.path[i] = Edge{
-					S:         sm.startLatin,
+					S:         startLatin,
 					WordCount: source.WordCount + 1,
 					UnkCount:  source.UnkCount,
 				}
-				sm.foundLatin = false
-				sm.leftBoundary = i
+				foundLatin = false
+				leftBoundary = i
 			}
 
-			if !sm.foundSpace {
-				sm.startSpace = i
-				sm.foundSpace = true
+			if !foundSpace {
+				startSpace = i
+				foundSpace = true
 			}
 
 			// check end of space because last ch
-			if i == sm.length-1 {
-				source := sm.path[sm.startSpace]
-				sm.bestEdge.S = sm.startSpace
-				sm.bestEdge.WordCount = source.WordCount + 1
-				sm.bestEdge.UnkCount = source.UnkCount
-				sm.foundBestEdge = true
-				sm.foundSpace = false
+			if i == length-1 {
+				source := sm.path[startSpace]
+				bestEdge.S = startSpace
+				bestEdge.WordCount = source.WordCount + 1
+				bestEdge.UnkCount = source.UnkCount
+				foundBestEdge = true
+				foundSpace = false
 			}
 		} else {
 			// check end of latin or end of space because current is not latin or space
-			if sm.foundSpace {
-				source := sm.path[sm.startSpace]
+			if foundSpace {
+				source := sm.path[startSpace]
 				sm.path[i] = Edge{
-					S:         sm.startSpace,
+					S:         startSpace,
 					WordCount: source.WordCount + 1,
 					UnkCount:  source.UnkCount,
 				}
-				sm.foundSpace = false
-				sm.leftBoundary = i
+				foundSpace = false
+				leftBoundary = i
 			}
 
-			if sm.foundLatin {
-				source := sm.path[sm.startLatin]
+			if foundLatin {
+				source := sm.path[startLatin]
 				sm.path[i] = Edge{
-					S:         sm.startLatin,
+					S:         startLatin,
 					WordCount: source.WordCount + 1,
 					UnkCount:  source.UnkCount,
 				}
-				sm.foundLatin = false
-				sm.leftBoundary = i
+				foundLatin = false
+				leftBoundary = i
 			}
 
 			sm.pointers = append(sm.pointers, DictBuilderPointer{})
@@ -342,27 +351,27 @@ func (sm *Segmenter) BuildPath(line []rune) {
 						WordCount: source.WordCount + 1,
 						UnkCount:  source.UnkCount,
 					}
-					if !sm.foundBestEdge {
-						sm.bestEdge = edge
-						sm.foundBestEdge = true
-					} else if (edge.UnkCount < sm.bestEdge.UnkCount) ||
-						((edge.UnkCount == sm.bestEdge.UnkCount) && (edge.WordCount <= sm.bestEdge.WordCount)) {
-						sm.bestEdge = edge
-						sm.foundBestEdge = true
+					if !foundBestEdge {
+						bestEdge = edge
+						foundBestEdge = true
+					} else if (edge.UnkCount < bestEdge.UnkCount) ||
+						((edge.UnkCount == bestEdge.UnkCount) && (edge.WordCount <= bestEdge.WordCount)) {
+						bestEdge = edge
+						foundBestEdge = true
 					}
 				}
 			}
 		}
 
-		if !sm.foundBestEdge {
-			source := sm.path[sm.leftBoundary]
-			sm.bestEdge.S = sm.leftBoundary
-			sm.bestEdge.WordCount = source.WordCount + 1
-			sm.bestEdge.UnkCount = source.UnkCount + 1
-			sm.foundBestEdge = true
+		if !foundBestEdge {
+			source := sm.path[leftBoundary]
+			bestEdge.S = leftBoundary
+			bestEdge.WordCount = source.WordCount + 1
+			bestEdge.UnkCount = source.UnkCount + 1
+			foundBestEdge = true
 		} else {
-			sm.leftBoundary = i + 1
+			leftBoundary = i + 1
 		}
-		sm.path[i+1] = sm.bestEdge
+		sm.path[i+1] = bestEdge
 	}
 }
