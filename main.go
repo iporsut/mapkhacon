@@ -213,16 +213,25 @@ func (sm *Segmenter) Segment(textRunes []rune) []string {
 	return tokens[i+1:]
 }
 
+type NullEdge struct {
+	Edge
+	Valid bool
+}
+
+func (ne *NullEdge) Set(e Edge) {
+	ne.Edge = e
+	ne.Valid = true
+}
+
 func (sm *Segmenter) BuildPath(line []rune) {
 	var (
-		leftBoundary  int
-		startLatin    int
-		foundLatin    bool
-		startSpace    int
-		foundSpace    bool
-		bestEdge      Edge
-		foundBestEdge bool
-		length        int
+		leftBoundary int
+		startLatin   int
+		foundLatin   bool
+		startSpace   int
+		foundSpace   bool
+		bestEdge     NullEdge
+		length       int
 	)
 
 	length = len(line)
@@ -240,8 +249,7 @@ func (sm *Segmenter) BuildPath(line []rune) {
 	}
 
 	for i, ch := range line {
-		bestEdge = Edge{}
-		foundBestEdge = false
+		bestEdge = NullEdge{}
 
 		// Check Edge type should be one of this
 		// Latin, Space, Dict, Unknow
@@ -267,10 +275,11 @@ func (sm *Segmenter) BuildPath(line []rune) {
 			// check end of latin because last ch
 			if i == length-1 {
 				source := sm.path[startLatin]
-				bestEdge.S = startLatin
-				bestEdge.WordCount = source.WordCount + 1
-				bestEdge.UnkCount = source.UnkCount
-				foundBestEdge = true
+				bestEdge.Set(Edge{
+					S:         startLatin,
+					WordCount: source.WordCount + 1,
+					UnkCount:  source.UnkCount,
+				})
 				foundLatin = false
 			}
 
@@ -296,10 +305,11 @@ func (sm *Segmenter) BuildPath(line []rune) {
 			// check end of space because last ch
 			if i == length-1 {
 				source := sm.path[startSpace]
-				bestEdge.S = startSpace
-				bestEdge.WordCount = source.WordCount + 1
-				bestEdge.UnkCount = source.UnkCount
-				foundBestEdge = true
+				bestEdge.Set(Edge{
+					S:         startSpace,
+					WordCount: source.WordCount + 1,
+					UnkCount:  source.UnkCount,
+				})
 				foundSpace = false
 			}
 		} else {
@@ -351,27 +361,26 @@ func (sm *Segmenter) BuildPath(line []rune) {
 						WordCount: source.WordCount + 1,
 						UnkCount:  source.UnkCount,
 					}
-					if !foundBestEdge {
-						bestEdge = edge
-						foundBestEdge = true
+					if !bestEdge.Valid {
+						bestEdge.Set(edge)
 					} else if (edge.UnkCount < bestEdge.UnkCount) ||
 						((edge.UnkCount == bestEdge.UnkCount) && (edge.WordCount <= bestEdge.WordCount)) {
-						bestEdge = edge
-						foundBestEdge = true
+						bestEdge.Set(edge)
 					}
 				}
 			}
 		}
 
-		if !foundBestEdge {
+		if !bestEdge.Valid {
 			source := sm.path[leftBoundary]
-			bestEdge.S = leftBoundary
-			bestEdge.WordCount = source.WordCount + 1
-			bestEdge.UnkCount = source.UnkCount + 1
-			foundBestEdge = true
+			bestEdge.Set(Edge{
+				S:         leftBoundary,
+				WordCount: source.WordCount + 1,
+				UnkCount:  source.UnkCount + 1,
+			})
 		} else {
 			leftBoundary = i + 1
 		}
-		sm.path[i+1] = bestEdge
+		sm.path[i+1] = bestEdge.Edge
 	}
 }
