@@ -27,6 +27,27 @@ type DictBuilderPointer struct {
 	IsFinal bool
 }
 
+// PrefixTreeNode represents node in a prefix tree
+type PrefixTreeNode struct {
+	NodeID int
+	Offset int
+	Ch     rune
+}
+
+// PrefixTreePointer is partial information of edge
+type PrefixTreePointer struct {
+	ChildID int
+	IsFinal bool
+}
+
+// PrefixTree is a Hash-based Prefix Tree for searching words
+type PrefixTree map[PrefixTreeNode]PrefixTreePointer
+
+type LineInput struct {
+	lineNo    int
+	textRunes []rune
+}
+
 func IsSpace(ch rune) bool {
 	return ch == ' ' ||
 		ch == '\n' ||
@@ -55,48 +76,22 @@ func LoadDict(path string) (PrefixTree, error) {
 		return nil, err
 	}
 	scanner := bufio.NewScanner(bytes.NewReader(b))
-	wordWithPayloads := make([]string, 0)
+	lines := make([]string, 0)
 	for scanner.Scan() {
 		if line := scanner.Text(); len(line) != 0 {
-			wordWithPayloads = append(wordWithPayloads, line)
+			lines = append(lines, line)
 		}
 	}
-	sort.Strings(wordWithPayloads)
-	return MakePrefixTree(wordWithPayloads), nil
-}
+	sort.Strings(lines)
 
-// LoadDefaultDict - loading default Thai dictionary
-func LoadDefaultDict() (PrefixTree, error) {
-	_, filename, _, _ := runtime.Caller(0)
-	return LoadDict(path.Join(path.Dir(filename), "tdict-std.txt"))
-}
-
-// PrefixTreeNode represents node in a prefix tree
-type PrefixTreeNode struct {
-	NodeID int
-	Offset int
-	Ch     rune
-}
-
-// PrefixTreePointer is partial information of edge
-type PrefixTreePointer struct {
-	ChildID int
-	IsFinal bool
-}
-
-// PrefixTree is a Hash-based Prefix Tree for searching words
-type PrefixTree map[PrefixTreeNode]PrefixTreePointer
-
-// MakePrefixTree is for constructing prefix tree for word with payload list
-func MakePrefixTree(wordsWithPayload []string) PrefixTree {
 	tab := make(PrefixTree)
-	for i, wordWithPayload := range wordsWithPayload {
-		word := wordWithPayload
+	for i, line := range lines {
 		rowNo := 0
+		runes := []rune(line)
+		len := len(runes)
 
-		runes := []rune(word)
 		for j, ch := range runes {
-			isFinal := ((j + 1) == len(runes))
+			isFinal := ((j + 1) == len)
 			node := PrefixTreeNode{rowNo, j, ch}
 
 			if child, found := tab[node]; !found {
@@ -108,12 +103,13 @@ func MakePrefixTree(wordsWithPayload []string) PrefixTree {
 		}
 	}
 
-	return tab
+	return tab, nil
 }
 
-type LineInput struct {
-	lineNo    int
-	textRunes []rune
+// LoadDefaultDict - loading default Thai dictionary
+func LoadDefaultDict() (PrefixTree, error) {
+	_, filename, _, _ := runtime.Caller(0)
+	return LoadDict(path.Join(path.Dir(filename), "tdict-std.txt"))
 }
 
 func main() {
