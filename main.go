@@ -107,12 +107,15 @@ func MakePrefixTree(wordsWithPayload []string) PrefixTree {
 	return PrefixTree(tab)
 }
 
-type Data struct {
-	lineNo int
-	line   string
+type LineInput struct {
+	lineNo    int
+	textRunes []rune
 }
 
 func main() {
+	// p := profile.Start(profile.CPUProfile, profile.ProfilePath("."))
+	// defer p.Stop()
+
 	var dixPath string
 	flag.StringVar(&dixPath, "dix", "", "Dictionary path")
 	flag.Parse()
@@ -130,48 +133,46 @@ func main() {
 	i := 0
 	var wg sync.WaitGroup
 	numWorker := runtime.NumCPU()
-	smw := InitSegmentWorker(dict, numWorker)
 	result := make(map[int]string)
-	chData := make(chan Data, numWorker)
+	lineInputCh := make(chan LineInput, numWorker)
 	done := make(chan struct{})
-	go func() {
-		for {
-			select {
-			case data := <-chData:
-				result[data.lineNo] = data.line
-			case <-done:
-				return
+	var resultMu sync.Mutex
+	for w := 0; w < numWorker; w++ {
+		go func() {
+			sm := &Segmenter{
+				dict: dict,
 			}
-		}
-	}()
+			for {
+				select {
+				case lineInput := <-lineInputCh:
+					line := strings.Join(sm.Segment(lineInput.textRunes), "|") + "\n"
+					resultMu.Lock()
+					result[lineInput.lineNo] = line
+					resultMu.Unlock()
+					wg.Done()
+				case <-done:
+					return
+				}
+			}
+		}()
+	}
 	for scanner.Scan() {
 		wg.Add(1)
 		text := scanner.Text()
-		sm := <-smw
-		go func(sm *Segmenter, lineNo int, textRunes []rune, out chan Data) {
-			defer wg.Done()
-			line := strings.Join(sm.Segment(textRunes), "|") + "\n"
-			out <- Data{lineNo: lineNo, line: line}
-			smw <- sm
-		}(sm, i, []rune(text), chData)
+		lineInputCh <- LineInput{
+			lineNo:    i,
+			textRunes: []rune(text),
+		}
 		i++
 	}
 	wg.Wait()
-	done <- struct{}{}
+	close(done)
 	for j := 0; j < i; j++ {
+		resultMu.Lock()
 		outbuf.WriteString(result[j])
+		resultMu.Unlock()
 	}
 	outbuf.Flush()
-}
-
-func InitSegmentWorker(dict PrefixTree, numWorker int) chan *Segmenter {
-	smw := make(chan *Segmenter, numWorker)
-	for i := 0; i < numWorker; i++ {
-		smw <- &Segmenter{
-			dict: dict,
-		}
-	}
-	return smw
 }
 
 type Segmenter struct {
