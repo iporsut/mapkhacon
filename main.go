@@ -71,17 +71,21 @@ func LoadDict(path string) (PrefixTree, error) {
 		return nil, err
 	}
 	defer f.Close()
+
 	b, err := ioutil.ReadAll(f)
 	if err != nil {
 		return nil, err
 	}
+
 	scanner := bufio.NewScanner(bytes.NewReader(b))
+
 	lines := make([]string, 0)
 	for scanner.Scan() {
 		if line := scanner.Text(); len(line) != 0 {
 			lines = append(lines, line)
 		}
 	}
+
 	sort.Strings(lines)
 
 	tab := make(PrefixTree)
@@ -120,9 +124,7 @@ func main() {
 	flag.StringVar(&dictPath, "dix", "", "Dictionary path")
 	flag.Parse()
 
-	w := NewSegmenterWorker(dictPath)
-	w.StartWorker()
-	w.Run()
+	NewSegmenterWorker(dictPath).Run()
 }
 
 func NewSegmenterWorker(dictPath string) *SegmenterWorker {
@@ -137,7 +139,8 @@ func NewSegmenterWorker(dictPath string) *SegmenterWorker {
 }
 
 type SegmenterWorker struct {
-	dict        PrefixTree
+	dict PrefixTree
+
 	lineInputCh chan LineInput
 	result      Result
 	done        chan struct{}
@@ -147,14 +150,12 @@ type SegmenterWorker struct {
 }
 
 func (w *SegmenterWorker) StartWorker() {
-	w.once.Do(func() {
-		w.lineInputCh = make(chan LineInput, runtime.NumCPU())
-		w.result = Result{
-			out:    bufio.NewWriter(os.Stdout),
-			result: make(map[int]string),
-		}
-		w.done = make(chan struct{})
-	})
+	w.lineInputCh = make(chan LineInput, runtime.NumCPU())
+	w.result = Result{
+		out:    bufio.NewWriter(os.Stdout),
+		result: make(map[int]string),
+	}
+	w.done = make(chan struct{})
 
 	for wc := 0; wc < runtime.NumCPU(); wc++ {
 		go func() {
@@ -165,7 +166,8 @@ func (w *SegmenterWorker) StartWorker() {
 			for {
 				select {
 				case lineInput := <-w.lineInputCh:
-					w.result.Set(lineInput.lineNo, strings.Join(sm.Segment(lineInput.textRunes), "|")+"\n")
+					result := strings.Join(sm.Segment(lineInput.textRunes), "|") + "\n"
+					w.result.Set(lineInput.lineNo, result)
 					w.wg.Done()
 				case <-w.done:
 					return
@@ -177,6 +179,8 @@ func (w *SegmenterWorker) StartWorker() {
 }
 
 func (w *SegmenterWorker) Run() {
+	w.once.Do(w.StartWorker)
+
 	b, err := ioutil.ReadAll(os.Stdin)
 	if err != nil {
 		log.Fatal("could not read input:", err)
@@ -187,11 +191,14 @@ func (w *SegmenterWorker) Run() {
 	i := 0
 	for scanner.Scan() {
 		w.wg.Add(1)
+
 		text := scanner.Text()
+
 		w.lineInputCh <- LineInput{
 			lineNo:    i,
 			textRunes: []rune(text),
 		}
+
 		i++
 	}
 
